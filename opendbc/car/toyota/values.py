@@ -56,6 +56,7 @@ class ToyotaSafetyFlags(IntFlag):
   STOCK_LONGITUDINAL = (2 << 8)
   LTA = (4 << 8)
   SECOC = (8 << 8)
+  TSS3 = (16 << 8)
 
 
 class ToyotaFlags(IntFlag):
@@ -74,6 +75,8 @@ class ToyotaFlags(IntFlag):
   # these cars can utilize 2.0 m/s^2
   RAISED_ACCEL_LIMIT = 1024
   SECOC = 2048
+  # CAN FD powertrain bus (TSS 3.0)
+  CAN_FD = 4096
 
   # deprecated flags
   # these cars are speculated to allow stop and go when the DSU is unplugged or disabled with sDSU
@@ -122,6 +125,15 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 
     if self.flags & ToyotaFlags.RADAR_ACC:
       self.dbc_dict = {Bus.pt: 'toyota_secoc_pt_generated'}
+
+
+@dataclass
+class ToyotaCanFDSecOCPlatformConfig(PlatformConfig):
+  """TSS 3.0: CAN FD + SecOC. EPS is owner-patched always-yes; 0x160 uses E2E CRC (keyless)."""
+  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla_tss3_pt'})
+
+  def init(self):
+    self.flags |= ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.SECOC | ToyotaFlags.CAN_FD
 
 
 class CAR(Platforms):
@@ -206,6 +218,10 @@ class CAR(Platforms):
       ToyotaCarDocs("Toyota Corolla Cross Hybrid (Non-US only) 2020-22", min_enable_speed=7.5),
       ToyotaCarDocs("Lexus UX Hybrid 2019-24"),
     ],
+    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
+  )
+  TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
+    [ToyotaSecOcCarDocs("Toyota Corolla 2023", min_enable_speed=MIN_ACC_SPEED)],
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
@@ -610,3 +626,28 @@ SECOC_CAR = CAR.with_flags(ToyotaFlags.SECOC)
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
 
 DBC = CAR.create_dbc_map()
+
+
+class TSS3LongMode:
+  OFF    = 0  # noOutput safety; no 0x160 transmitted
+  SHADOW = 1  # reads template only; no transmission
+  LIVE   = 2  # openpilot sends 0x160 with its own accel (modify-and-forward;
+              # panda blocks the camera's copy via fwd_hook when controls_allowed).
+              # cruiseState.enabled reads 0x8A.ACC_ENGAGED, independent of 0x13C.
+              # openpilot does NOT send 0x13C; accel is carried in 0x160 (E2E CRC).
+
+
+TSS3_LONG_MODE = TSS3LongMode.LIVE
+
+
+class TSS3LatMode:
+  OFF  = 0  # no lateral substitution; 0x160 b22:24 relayed as-is from camera
+  LIVE = 2  # openpilot substitutes b22:24 (angle bytes) in every 0x160 it sends
+
+
+TSS3_LAT_MODE = TSS3LatMode.LIVE
+
+TSS3_MAX_STEER_ANGLE = 55.0    # deg; openpilot's commanded angle clamp (scale 537.7, confirmed 1:1)
+TSS3_LAT_RELAY_ONLY = False
+TSS3_PT_BUS = 1                # CAN FD powertrain bus (unrelayed, bus 1 with stock harness)
+TSS3_MIN_OVERRIDE_SPEED = 0.45  # m/s (~1 mph)

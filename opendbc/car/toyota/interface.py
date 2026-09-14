@@ -3,7 +3,8 @@ from opendbc.car.toyota.carstate import CarState
 from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
-                                                  MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ToyotaSafetyFlags, UNSUPPORTED_DSU_CAR
+                                                  MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ToyotaSafetyFlags, UNSUPPORTED_DSU_CAR, \
+                                                  TSS3_LONG_MODE, TSS3LongMode
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP, ToyotaSafetyFlagsSP
@@ -32,7 +33,15 @@ class CarInterface(CarInterfaceBase):
     if DBC[candidate][Bus.pt] == "toyota_new_mc_pt_generated":
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.ALT_BRAKE.value
 
-    if ret.flags & ToyotaFlags.SECOC.value:
+    if ret.flags & ToyotaFlags.CAN_FD.value:
+      # 0x160 uses AUTOSAR E2E CRC (keyless), not SecOC. EPS is owner-patched always-yes.
+      # Clear secOcRequired so card.py does not force passive mode without a key.
+      ret.secOcRequired = False
+      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.SECOC.value | ToyotaSafetyFlags.TSS3.value
+      ret.openpilotLongitudinalControl = TSS3_LONG_MODE != TSS3LongMode.OFF
+      ret.alphaLongitudinalAvailable = TSS3_LONG_MODE != TSS3LongMode.OFF
+      ret.minEnableSpeed = -1.
+    elif ret.flags & ToyotaFlags.SECOC.value:
       ret.secOcRequired = True
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.SECOC.value
       ret.dashcamOnly = is_release

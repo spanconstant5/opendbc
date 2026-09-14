@@ -6,7 +6,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
-                                                  TSS2_CAR, EPS_SCALE
+                                                  TSS2_CAR, EPS_SCALE, TSS3_PT_BUS
 from opendbc.sunnypilot.car.toyota.carstate_ext import CarStateExt
 from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP
 
@@ -55,7 +55,13 @@ class CarState(CarStateBase, CarStateExt):
     self.gvc = 0.0
     self.secoc_synchronization = None
 
+    self.tss3_accel_template = None
+    self.tss3_camera_accel = 0.0
+    self.tss3_stock_lon_active = False
+
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
+    if self.CP.flags & ToyotaFlags.CAN_FD.value:
+      return self.update_tss3(can_parsers)
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
 
@@ -216,8 +222,82 @@ class CarState(CarStateBase, CarStateExt):
 
     return ret, ret_sp
 
+  def update_tss3(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
+    cp = can_parsers[Bus.pt]
+    cam = can_parsers[Bus.cam]
+
+    ret = structs.CarState()
+    ret_sp = structs.CarStateSP()
+
+    self.parse_wheel_speeds(ret,
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FL"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FR"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
+    )
+    ret.standstill = abs(ret.vEgoRaw) < 1e-3
+
+    ret.steeringAngleDeg = cp.vl["STEER_ANGLE_ACC_STATUS"]["STEER_ANGLE"]
+    ret.steeringRateDeg = 0.
+    ret.yawRate = cp.vl["KINEMATICS"]["YAW_RATE"]
+
+    ret.steeringTorque = cp.vl["STEER_TORQUE_SENSOR"]["TORQUE_1"]
+    ret.steeringTorqueEps = cp.vl["STEER_TORQUE_SENSOR"]["TORQUE_2"]
+    ret.steeringPressed = False
+
+    ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
+    ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] != 0
+
+    ret.gearShifter = self.parse_gear_shifter(
+      self.shifter_values.get(int(cp.vl["GEAR_PACKET"]["GEAR"]), None))
+
+    acc_state = int(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STATE"])
+    ret.cruiseState.available = acc_state != 0
+    ret.cruiseState.enabled = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_ENGAGED"])
+    ret.cruiseState.speed = cp.vl["ACC_HUD"]["SET_SPEED"] * CV.MPH_TO_MS
+    ret.cruiseState.standstill = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STANDSTILL"])
+
+    ret.doorOpen = False
+    ret.seatbeltUnlatched = False
+    ret.leftBlinker = False
+    ret.rightBlinker = False
+    ret.steerFaultTemporary = False
+    ret.steerFaultPermanent = False
+    ret.buttonEvents = []
+
+    self.secoc_synchronization = copy.copy(cp.vl["SECOC_SYNCHRONIZATION"])
+
+    adas = cam.vl["ADAS_ACC_REQUEST"]
+    self.tss3_accel_template = bytes(int(adas[f"BYTE{k:02d}"]) & 0xFF for k in range(32))
+    self.tss3_camera_accel = float(adas["ACCEL_REQ"])
+    self.tss3_stock_lon_active = bool(cp.vl["ACC_CONTROL"]["LON_ACTIVE"])
+
+    return ret, ret_sp
+
   @staticmethod
   def get_can_parsers(CP, CP_SP):
+    if CP.flags & ToyotaFlags.CAN_FD.value:
+      tss3_messages = [
+        ("WHEEL_SPEEDS", float('nan')),
+        ("STEER_ANGLE_ACC_STATUS", 40),
+        ("STEER_ANGLE_SENSOR", float('nan')),
+        ("KINEMATICS", float('nan')),
+        ("STEER_TORQUE_SENSOR", 42),
+        ("BRAKE_MODULE", float('nan')),
+        ("GEAR_PACKET", float('nan')),
+        ("SECOC_SYNCHRONIZATION", 10),
+        ("ACC_CONTROL", 20),
+        ("GAS_PEDAL", float('nan')),
+        ("ACC_HUD", float('nan')),
+      ]
+      tss3_cam_messages = [
+        ("ADAS_ACC_REQUEST", 40),
+      ]
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], tss3_messages, TSS3_PT_BUS),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], tss3_cam_messages, 2),
+      }
+
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]
