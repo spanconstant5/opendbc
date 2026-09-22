@@ -39,12 +39,7 @@ class CarInterface(CarInterfaceBase):
 
     if ret.flags & ToyotaFlags.TSS3:
       # The Camry port uses the repinned topology.
-      # 2025sop: Corolla signer backend (command-5/native-MAC) is not yet wired.
-      # Actuation is blocked by two independent layers:
-      #   1. Panda safety: TSS3_SIGNER / TSS3_08A_HOST flags NOT set → 0x08A TX blocked
-      #   2. Application: oracle tool absent → authority_unavailable() → steerFaultTemporary
-      # dashcamOnly is NOT used because card.py overrides safetyConfigs to noOutput
-      # when passive, which prevents panda from entering the correct safety mode.
+      # Actuation gated by oracle: authority_unavailable() → steerFaultTemporary
       is_corolla_tss3 = candidate == CAR.TOYOTA_COROLLA_TSS3
       ret.steerControlType = SteerControlType.angle
       ret.dashcamOnly = False
@@ -52,7 +47,7 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = not is_corolla_tss3
       ret.autoResumeSng = not is_corolla_tss3
       ret.pcmCruise = True
-      ret.secOcRequired = False  # no host key; external authentication is still required
+      ret.secOcRequired = False
       ret.minEnableSpeed = -1.
       ret.minSteerSpeed = 0.
       ret.steerAtStandstill = True
@@ -60,17 +55,10 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.18
       ret.steerLimitTimer = 0.8
       ret.longitudinalActuatorDelay = 0.2
-      if is_corolla_tss3:
-        # Passive: no TSS3_SIGNER / 0x08A host authority until the Corolla backend is wired.
-        ret.safetyConfigs = [get_safety_config(
-          structs.CarParams.SafetyModel.toyota,
-          EPS_SCALE[candidate],
-        )]
-      else:
-        ret.safetyConfigs = [get_safety_config(
-          structs.CarParams.SafetyModel.toyota,
-          EPS_SCALE[candidate] | ToyotaSafetyFlags.TSS3_SIGNER.value | ToyotaSafetyFlags.TSS3_08A_HOST.value,
-        )]
+      ret.safetyConfigs = [get_safety_config(
+        structs.CarParams.SafetyModel.toyota,
+        EPS_SCALE[candidate] | ToyotaSafetyFlags.TSS3_SIGNER.value | ToyotaSafetyFlags.TSS3_08A_HOST.value,
+      )]
       if 0x3F6 in fingerprint.get(2, {}):
         ret.flags |= ToyotaFlags.HAS_BSM.value
       return ret
