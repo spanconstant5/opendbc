@@ -260,8 +260,8 @@ class CAR(Platforms):
   # EPS F181 8965F1208000 / 8A3111213000, serial 8965012N50E12H030731.
   # The Corolla EPS signer backend is the command-5/native-MAC path (EPS-side),
   # NOT the Camry-native 0x777 host transport in tss3.py, so it is NOT wired here.
-  # Actuation is held OFF in interface.py (dashcamOnly, long disabled, 0x08A signer
-  # safety not asserted). Specs approximated from Corolla TSS2 pending measurement.
+  # Actuation blocked: long disabled, TSS3_SIGNER/TSS3_08A_HOST flags not set
+  # (panda blocks 0x08A TX), oracle absent. Specs from Corolla TSS2 pending measurement.
   # See ADAPTATION_2025SOP.md at the repo root.
   TOYOTA_COROLLA_TSS3 = ToyotaTSS3PlatformConfig(
     [ToyotaTSS3CarDocs("Toyota Corolla Hybrid 2025", package="Repinned harness")],

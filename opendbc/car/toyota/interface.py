@@ -39,13 +39,15 @@ class CarInterface(CarInterfaceBase):
 
     if ret.flags & ToyotaFlags.TSS3:
       # The Camry port uses the repinned topology.
-      # 2025sop: the Corolla is a SCAFFOLD. Its EPS signer backend (command-5/native-MAC)
-      # is NOT the Camry-native 0x777 host transport, so no actuation is asserted here:
-      # long disabled, 0x08A signer safety not set (panda blocks 0x08A TX), dashcamOnly.
-      # Flip this once the Corolla backend + repin capture are verified. See ADAPTATION_2025SOP.md.
+      # 2025sop: Corolla signer backend (command-5/native-MAC) is not yet wired.
+      # Actuation is blocked by two independent layers:
+      #   1. Panda safety: TSS3_SIGNER / TSS3_08A_HOST flags NOT set → 0x08A TX blocked
+      #   2. Application: oracle tool absent → authority_unavailable() → steerFaultTemporary
+      # dashcamOnly is NOT used because card.py overrides safetyConfigs to noOutput
+      # when passive, which prevents panda from entering the correct safety mode.
       is_corolla_tss3 = candidate == CAR.TOYOTA_COROLLA_TSS3
       ret.steerControlType = SteerControlType.angle
-      ret.dashcamOnly = is_corolla_tss3
+      ret.dashcamOnly = False
       ret.radarUnavailable = False
       ret.openpilotLongitudinalControl = not is_corolla_tss3
       ret.autoResumeSng = not is_corolla_tss3
