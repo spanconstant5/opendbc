@@ -256,6 +256,19 @@ class CAR(Platforms):
     ],
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
+  # 2025 Toyota Corolla Hybrid (Span / spanconstant). TSS3 SCAFFOLD ONLY.
+  # EPS F181 8965F1208000 / 8A3111213000, serial 8965012N50E12H030731.
+  # The Corolla EPS signer backend is the command-5/native-MAC path (EPS-side),
+  # NOT the Camry-native 0x777 host transport in tss3.py, so it is NOT wired here.
+  # Actuation is held OFF in interface.py (dashcamOnly, long disabled, 0x08A signer
+  # safety not asserted). Specs approximated from Corolla TSS2 pending measurement.
+  # See ADAPTATION_2025SOP.md at the repo root.
+  TOYOTA_COROLLA_TSS3 = ToyotaTSS3PlatformConfig(
+    [ToyotaTSS3CarDocs("Toyota Corolla Hybrid 2025", package="Repinned harness")],
+    TOYOTA_COROLLA_TSS2.specs,
+    dbc_dict={Bus.pt: 'toyota_tss3_pt_generated', Bus.radar: 'toyota_tss3_pt_generated'},
+    flags=ToyotaFlags.HYBRID,
+  )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
       ToyotaCarDocs("Toyota Highlander 2017-19", video="https://www.youtube.com/watch?v=0wS0wXSLzoo"),

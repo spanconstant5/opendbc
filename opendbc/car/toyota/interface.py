@@ -39,11 +39,16 @@ class CarInterface(CarInterfaceBase):
 
     if ret.flags & ToyotaFlags.TSS3:
       # The Camry port uses the repinned topology.
+      # 2025sop: the Corolla is a SCAFFOLD. Its EPS signer backend (command-5/native-MAC)
+      # is NOT the Camry-native 0x777 host transport, so no actuation is asserted here:
+      # long disabled, 0x08A signer safety not set (panda blocks 0x08A TX), dashcamOnly.
+      # Flip this once the Corolla backend + repin capture are verified. See ADAPTATION_2025SOP.md.
+      is_corolla_tss3 = candidate == CAR.TOYOTA_COROLLA_TSS3
       ret.steerControlType = SteerControlType.angle
-      ret.dashcamOnly = False
+      ret.dashcamOnly = is_corolla_tss3
       ret.radarUnavailable = False
-      ret.openpilotLongitudinalControl = True
-      ret.autoResumeSng = True
+      ret.openpilotLongitudinalControl = not is_corolla_tss3
+      ret.autoResumeSng = not is_corolla_tss3
       ret.pcmCruise = True
       ret.secOcRequired = False  # no host key; external authentication is still required
       ret.minEnableSpeed = -1.
@@ -53,10 +58,17 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.18
       ret.steerLimitTimer = 0.8
       ret.longitudinalActuatorDelay = 0.2
-      ret.safetyConfigs = [get_safety_config(
-        structs.CarParams.SafetyModel.toyota,
-        EPS_SCALE[candidate] | ToyotaSafetyFlags.TSS3_SIGNER.value | ToyotaSafetyFlags.TSS3_08A_HOST.value,
-      )]
+      if is_corolla_tss3:
+        # Passive: no TSS3_SIGNER / 0x08A host authority until the Corolla backend is wired.
+        ret.safetyConfigs = [get_safety_config(
+          structs.CarParams.SafetyModel.toyota,
+          EPS_SCALE[candidate],
+        )]
+      else:
+        ret.safetyConfigs = [get_safety_config(
+          structs.CarParams.SafetyModel.toyota,
+          EPS_SCALE[candidate] | ToyotaSafetyFlags.TSS3_SIGNER.value | ToyotaSafetyFlags.TSS3_08A_HOST.value,
+        )]
       if 0x3F6 in fingerprint.get(2, {}):
         ret.flags |= ToyotaFlags.HAS_BSM.value
       return ret

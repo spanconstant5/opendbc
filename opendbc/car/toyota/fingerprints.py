@@ -18,6 +18,16 @@ FW_VERSIONS = {
       b'\x01F152633K0000\x00\x00\x00\x00',
     ],
   },
+  # 2025 Corolla Hybrid (Span / spanconstant). EPS F181 observed live on the
+  # corrected direct route (serial 8965012N50E12H030731). Only the EPS record is
+  # known; fwdCamera/ABS FW not yet captured, so auto-fingerprint is incomplete --
+  # use a FORCED fingerprint (TOYOTA_COROLLA_TSS3) until full carFw is collected.
+  # See ADAPTATION_2025SOP.md.
+  CAR.TOYOTA_COROLLA_TSS3: {
+    (Ecu.eps, 0x7A1, None): [
+      b'\x028965F1208000\x00\x00\x00\x008A3111213000\x00\x00\x00\x00',
+    ],
+  },
   CAR.TOYOTA_AVALON: {
     (Ecu.abs, 0x7b0, None): [
       b'F152607060\x00\x00\x00\x00\x00\x00',
