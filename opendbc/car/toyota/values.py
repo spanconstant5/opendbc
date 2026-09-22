@@ -49,7 +49,7 @@ class CarControllerParams:
   MAX_LTA_DRIVER_TORQUE_ALLOWANCE = 150  # slightly above steering pressed allows some resistance when changing lanes
 
   def __init__(self, CP):
-    if CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS3:
+    if CP.flags & ToyotaFlags.TSS3:
       self.ANGLE_LIMITS = self.F33_ANGLE_LIMITS
 
     if CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS3:
