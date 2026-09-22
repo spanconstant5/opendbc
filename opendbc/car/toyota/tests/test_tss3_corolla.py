@@ -2,7 +2,9 @@
 import unittest
 
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import CanData
+from opendbc.car import CanData, structs
+from opendbc.car.toyota.interface import CarInterface
+from opendbc.car.toyota.values import CAR, ToyotaSafetyFlags
 
 
 SPAN_FRAMES = {
@@ -28,6 +30,16 @@ ALBINO_GEAR = {
 
 
 class TestToyotaTss3SharedDbc(unittest.TestCase):
+  def test_corolla_params_initialize_without_enabling_actuation(self):
+    # The torque-data lookup crashed card before it could publish CarParams.
+    cp = CarInterface.get_non_essential_params(CAR.TOYOTA_COROLLA_TSS3)
+    self.assertGreater(cp.maxLateralAccel, 0)
+    self.assertTrue(cp.dashcamOnly)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+    self.assertEqual(cp.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.toyota)
+    self.assertFalse(cp.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.TSS3_SIGNER)
+    self.assertFalse(cp.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.TSS3_08A_HOST)
+
   def test_retained_corolla_state_decodes_with_shared_dbc(self):
     parser = CANParser("toyota_tss3_pt_generated", [(address, 0) for address in (0x025, 0x030, 0x101, 0x116, 0x127)], 1)
     parser.update([(1_000_000_000, [CanData(a, d, 1) for a, d in SPAN_FRAMES.items()])])
