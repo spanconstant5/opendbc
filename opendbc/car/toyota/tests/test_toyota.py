@@ -319,7 +319,8 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
     msgs = TSS3_MSGS | {int(k[1:], 16): v for k, v in frames.items()}  # e.g. x08A=b"..."
     msgs[0x0AA] = (6767 + round(speed_ms * 360)).to_bytes(2, "big") * 4
     for _ in range(iterations):
-      packets = [CanData(address, data, tss3_bus(address)) for address, data in msgs.items()] + list(extra)
+      packets = [CanData(address, data, TSS3_SOURCE_BUS if self.car_model == CAR.TOYOTA_COROLLA_TSS3 else tss3_bus(address))
+                 for address, data in msgs.items()] + list(extra)
       state = ci.update([(self.can_t, packets)])
       self.can_t += 10 * MS
     return state
@@ -337,11 +338,14 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
       self.assertEqual((CP.openpilotLongitudinalControl, CP.autoResumeSng), (alpha_long, alpha_long))
       self.assertEqual(bool(CP.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.STOCK_LONGITUDINAL), not alpha_long)
       self.assertTrue(CP.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.TSS3)
-      self.assertTrue(CP.flags & ToyotaFlags.HAS_BSM)
+      self.assertEqual(bool(CP.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.TSS3_RX_BUS_2),
+                       self.car_model == CAR.TOYOTA_COROLLA_TSS3)
+      self.assertEqual(bool(CP.flags & ToyotaFlags.HAS_BSM), self.car_model != CAR.TOYOTA_COROLLA_TSS3)
     self.assertTrue(self.params(alpha_long=False, is_release=True).dashcamOnly)
 
   def test_carstate(self):
-    self.assertEqual((self.ci.can_parsers[Bus.pt].bus, self.ci.can_parsers[Bus.cam].bus), (TSS3_CHASSIS_BUS, TSS3_SOURCE_BUS))
+    pt_bus = TSS3_SOURCE_BUS if self.car_model == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
+    self.assertEqual((self.ci.can_parsers[Bus.pt].bus, self.ci.can_parsers[Bus.cam].bus), (pt_bus, TSS3_SOURCE_BUS))
     state = self.update()
     self.assertTrue(state.canValid)
     self.assertEqual(state.gearShifter, structs.CarState.GearShifter.drive)
@@ -465,7 +469,8 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
     self.assertFalse(self.update(x030=bytes(eps)).canValid)
 
   def test_signer_state_from_can(self):
-    self.update(extra=[CanData(0x7A9, bytes.fromhex("c90500fa12345678"), 0), CanData(0x777, b"\xb5" + bytes(7), 192),
+    pt_bus = TSS3_SOURCE_BUS if self.car_model == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
+    self.update(extra=[CanData(0x7A9, bytes.fromhex("c90500fa12345678"), pt_bus), CanData(0x777, b"\xb5" + bytes(7), 192),
                        CanData(0x08A, TSS3_MSGS[0x08A], 192)], iterations=1)
     CS = self.ci.CS
     self.assertEqual([(r["SIGNER_SEQUENCE"], r["SIGNER_SEQUENCE_INVERTED"], r["AUTHENTICATOR"]) for r in CS.tss3_signer_responses],
