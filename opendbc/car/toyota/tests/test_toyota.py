@@ -5,7 +5,7 @@ from unittest.mock import patch
 from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, CanData, structs
 from opendbc.car.structs import CarParams
-from opendbc.car.fw_versions import build_fw_dict
+from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.toyota.fingerprints import FW_VERSIONS
 from opendbc.car.toyota.interface import CarInterface
 from opendbc.car.toyota.radar_interface import TSS3_DIST_INVALID, TSS3_GEOMETRY_MSGS, TSS3_SLOTS, RadarInterface
@@ -160,6 +160,25 @@ class TestToyotaInterfaces(unittest.TestCase):
 
 
 class TestToyotaFingerprint(unittest.TestCase):
+  def test_corolla_tss3_2025_fw_exact_match(self):
+    reference_fw = {
+      (Ecu.engine, 0x700, None): b'\x018A2221221000\x00\x00\x00\x00',
+      (Ecu.abs, 0x7b0, None): b'\x01F152612D1700\x00\x00\x00\x00',
+      (Ecu.eps, 0x7a1, None): b'\x028965F1208000\x00\x00\x00\x008A3111213000\x00\x00\x00\x00',
+      (Ecu.fwdRadar, 0x750, 0xf): b'\x018821F4801200\x00\x00\x00\x00',
+      (Ecu.fwdCamera, 0x792, None): b'\x018646F210200\x00\x00\x00\x00',
+    }
+    car_fw = [
+      CarParams.CarFw(ecu=ecu, address=address, subAddress=0 if sub_address is None else sub_address,
+                      fwVersion=version, brand="toyota")
+      for (ecu, address, sub_address), version in reference_fw.items()
+    ]
+
+    exact, matches = match_fw_to_car(car_fw, "", allow_fuzzy=False, log=False)
+
+    self.assertTrue(exact)
+    self.assertEqual(matches, {CAR.TOYOTA_COROLLA_TSS3})
+
   def test_non_essential_ecus(self):
     # Ensures only the cars that have multiple engine ECUs are in the engine non-essential ECU list
     for car_model, ecus in FW_VERSIONS.items():
