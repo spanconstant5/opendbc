@@ -346,6 +346,8 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
   def test_carstate(self):
     pt_bus = TSS3_SOURCE_BUS if self.car_model == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
     self.assertEqual((self.ci.can_parsers[Bus.pt].bus, self.ci.can_parsers[Bus.cam].bus), (pt_bus, TSS3_SOURCE_BUS))
+    self.assertEqual((self.ci.can_parsers[Bus.loopback].bus, self.ci.can_parsers[Bus.adas].bus),
+                     (TSS3_CHASSIS_BUS + 192, pt_bus + 192))
     state = self.update()
     self.assertTrue(state.canValid)
     self.assertEqual(state.gearShifter, structs.CarState.GearShifter.drive)
@@ -429,8 +431,9 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
     for alpha_long in (False, True):
       with self.subTest(alpha_long=alpha_long):
         self.ci = self.interface(alpha_long)
+        signer_bus = TSS3_SOURCE_BUS if self.car_model == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
         self.update(speed_ms=10.0)
-        self.assertTrue(any(address == 0x777 and bus == TSS3_CHASSIS_BUS for address, _, bus in self.apply(tss3_control())[1]))
+        self.assertTrue(any(address == 0x777 and bus == signer_bus for address, _, bus in self.apply(tss3_control())[1]))
 
         # the FRC's request goes to the VMC, openpilot stops signing and publishing its own
         self.ci.CC.signer.active = True
@@ -438,11 +441,12 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
         _, sends = self.apply(tss3_control())
         self.assertTrue(release in sends)
         for _ in range(10):
-          self.assertFalse(any(address in (0x777, 0x08A) and bus == TSS3_CHASSIS_BUS for address, _, bus in sends))
+          self.assertFalse(any((address == 0x777 and bus == signer_bus) or
+                               (address == 0x08A and bus == TSS3_CHASSIS_BUS) for address, _, bus in sends))
           _, sends = self.apply(tss3_control())
 
         self.update(speed_ms=10.0)
-        self.assertTrue(any(address == 0x777 and bus == TSS3_CHASSIS_BUS for address, _, bus in self.apply(tss3_control())[1]))
+        self.assertTrue(any(address == 0x777 and bus == signer_bus for address, _, bus in self.apply(tss3_control())[1]))
 
   def test_eps_status(self):
     # recorded with 1.57 Nm of driver torque, and at startup with angle control inhibited
@@ -470,7 +474,8 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
 
   def test_signer_state_from_can(self):
     pt_bus = TSS3_SOURCE_BUS if self.car_model == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
-    self.update(extra=[CanData(0x7A9, bytes.fromhex("c90500fa12345678"), pt_bus), CanData(0x777, b"\xb5" + bytes(7), 192),
+    self.update(extra=[CanData(0x7A9, bytes.fromhex("c90500fa12345678"), pt_bus),
+                       CanData(0x777, b"\xb5" + bytes(7), pt_bus + 192),
                        CanData(0x08A, TSS3_MSGS[0x08A], 192)], iterations=1)
     CS = self.ci.CS
     self.assertEqual([(r["SIGNER_SEQUENCE"], r["SIGNER_SEQUENCE_INVERTED"], r["AUTHENTICATOR"]) for r in CS.tss3_signer_responses],
@@ -629,6 +634,14 @@ class TestToyotaTSS3SignerTransport(unittest.TestCase):
     self.assertEqual({s: parser.vl["CONTROL_REQUEST"][s] for s in SIGNER_TRAILER}, SIGNER_TRAILER)
     self.assertEqual(parser.vl["CONTROL_REQUEST"]["LATERAL_REQUEST_ID"], 11)
     self.assertAlmostEqual(parser.vl["CONTROL_REQUEST"]["LONGITUDINAL_REQUEST_ACCEL_UPPER"], 0.5)
+
+  def test_configurable_signer_bus_does_not_move_publication(self):
+    self.signer = SignerTransport(self.packer, stock_longitudinal=False, signer_bus=TSS3_SOURCE_BUS)
+    fragments = signer_requests(self.step())
+    self.assertTrue(fragments and all(bus == TSS3_SOURCE_BUS for _, bus in fragments))
+
+    sends = self.step(signer_state([signer_response(1)]))
+    self.assertEqual([bus for address, _, bus in sends if address == 0x08A], [TSS3_CHASSIS_BUS])
 
   def test_stock_longitudinal_only_replaces_lateral_fields_and_sequence(self):
     stock_frame = TSS3_MSGS[0x08A]

@@ -84,7 +84,8 @@ class CarController(CarControllerBase):
     self.secoc_prev_reset_counter = 0
 
     if self.CP.flags & ToyotaFlags.TSS3:
-      self.signer = SignerTransport(self.packer, stock_longitudinal=not self.CP.openpilotLongitudinalControl)
+      signer_bus = TSS3_SOURCE_BUS if self.CP.carFingerprint == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
+      self.signer = SignerTransport(self.packer, stock_longitudinal=not self.CP.openpilotLongitudinalControl, signer_bus=signer_bus)
       # Vehicle model used for lateral limiting
       self.VM = VehicleModel(get_safety_CP())
 

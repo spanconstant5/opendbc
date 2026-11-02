@@ -403,8 +403,8 @@ class TestToyotaSecOcSafety(TestToyotaSecOcSafetyBase):
         self.assertEqual(should_tx, self._tx(self._accel_msg_343(accel, cancel_req=1)))
 
 
-def build_signer_requests(seq: int, request: bytes):
-  return toyotacan.create_tss3_signer_requests(TSS3_PACKER, 0, seq, request)
+def build_signer_requests(seq: int, request: bytes, bus: int = 0):
+  return toyotacan.create_tss3_signer_requests(TSS3_PACKER, bus, seq, request)
 
 
 def build_host_application(lat_active: bool = False, angle_raw: int = 0, accel: float = 0.0, request_sequence: int = 0,
@@ -917,6 +917,17 @@ class TestToyotaTss3SafetyBus2Rx(common.SafetyTestBase):
     for msg in self._required_rx(0):
       self._rx(msg)
     self.assertFalse(self.safety.safety_config_valid())
+
+  def test_signer_requests_use_bus_2(self):
+    request = build_host_application(stock=TSS3_FRC_08A)
+    for bus, allowed in ((0, False), (2, True)):
+      with self.subTest(bus=bus):
+        self._reset_safety_hooks()
+        self.safety.init_tests()
+        self.assertTrue(self._rx(libsafety_py.make_CANPacket(0x08A, 2, TSS3_FRC_08A)))
+        results = [self._tx(libsafety_py.make_CANPacket(address, frame_bus, dat))
+                   for address, dat, frame_bus in build_signer_requests(1, request, bus)]
+        self.assertEqual(results, [allowed] * 4)
 
 
 if __name__ == "__main__":
