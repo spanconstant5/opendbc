@@ -891,5 +891,33 @@ class TestToyotaTss3SafetyStockLongitudinal(Tss3SafetyHelpers, common.SafetyTest
       self.assertTrue(self._publish(request))
 
 
+class TestToyotaTss3SafetyBus2Rx(common.SafetyTestBase):
+
+  DBC = TSS3_DBC
+  SAFETY_MODEL = CarParams.SafetyModel.toyota
+  SAFETY_PARAM = (EPS_SCALE[CAR.TOYOTA_COROLLA_TSS3] | ToyotaSafetyFlags.TSS3 |
+                  ToyotaSafetyFlags.TSS3_RX_BUS_2 | ToyotaSafetyFlags.STOCK_LONGITUDINAL)
+
+  def _required_rx(self, bus: int):
+    return [
+      self.packer.make_can_msg_safety("STEER_ANGLE_SENSOR", bus, {}),
+      self.packer.make_can_msg_safety("WHEEL_SPEEDS", bus, {}),
+      self.packer.make_can_msg_safety("GAS_PEDAL", bus, {}),
+      self.packer.make_can_msg_safety("BRAKE_MODULE", bus, {}, fix_toyota_checksum),
+      libsafety_py.make_CANPacket(0x08A, 2, TSS3_FRC_08A),
+    ]
+
+  def test_required_rx_checks_use_bus_2(self):
+    for msg in self._required_rx(2):
+      self.assertTrue(self._rx(msg))
+    self.assertTrue(self.safety.safety_config_valid())
+
+    self._reset_safety_hooks()
+    self.safety.init_tests()
+    for msg in self._required_rx(0):
+      self._rx(msg)
+    self.assertFalse(self.safety.safety_config_valid())
+
+
 if __name__ == "__main__":
   unittest.main()

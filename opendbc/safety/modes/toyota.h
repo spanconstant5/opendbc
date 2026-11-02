@@ -78,20 +78,20 @@
                {0},                                                            \
                {0}}},
 
-#define TOYOTA_TSS3_RX_CHECKS                                                  \
-  {.msg = {{0x025, 0, 32, 100U, .ignore_checksum = true,                       \
+#define TOYOTA_TSS3_RX_CHECKS(rx_bus)                                          \
+  {.msg = {{0x025, (rx_bus), 32, 100U, .ignore_checksum = true,                \
             .ignore_counter = true, .ignore_quality_flag = true},              \
            {0},                                                                \
            {0}}},                                                              \
-      {.msg = {{0x0AA, 0, 8, 100U, .ignore_checksum = true,                    \
+      {.msg = {{0x0AA, (rx_bus), 8, 100U, .ignore_checksum = true,             \
                 .ignore_counter = true},                                       \
                {0},                                                            \
                {0}}},                                                          \
-      {.msg = {{0x116, 0, 8, 40U, .ignore_checksum = true,                     \
+      {.msg = {{0x116, (rx_bus), 8, 40U, .ignore_checksum = true,              \
                 .ignore_counter = true, .ignore_quality_flag = true},          \
                {0},                                                            \
                {0}}},                                                          \
-      {.msg = {{0x101, 0, 8, 50U, .ignore_counter = true,                      \
+      {.msg = {{0x101, (rx_bus), 8, 50U, .ignore_counter = true,               \
                 .ignore_quality_flag = true},                                  \
                {0},                                                            \
                {0}}},                                                          \
@@ -120,6 +120,7 @@ static bool toyota_alt_brake = false;
 static bool toyota_stock_longitudinal = false;
 static bool toyota_lta = false;
 static bool toyota_tss3 = false;
+static bool toyota_tss3_rx_bus_2 = false;
 
 // TSS3: openpilot replaces the FRC's CONTROL_REQUEST (0x08A) while the EPS
 // signer is armed. Requests are checked when they are sent to the signer, and
@@ -192,6 +193,7 @@ static bool toyota_get_quality_flag_valid(const CANPacket_t *msg) {
 }
 
 static void toyota_rx_hook(const CANPacket_t *msg) {
+  const uint8_t tss3_rx_bus = toyota_tss3_rx_bus_2 ? 2U : 0U;
   if (toyota_tss3) {
     // CONTROL_REQUEST from the FRC
     if (msg_matches(msg, 0x8AU, 2U, 32U)) {
@@ -217,7 +219,7 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
     }
 
     // STEER_ANGLE_SENSOR, in LATERAL_REQUEST_PINION_ANGLE units
-    if (msg_matches(msg, 0x25U, 0U)) {
+    if (msg_matches(msg, 0x25U, tss3_rx_bus)) {
       int angle_coarse =
           to_signed(((msg->data[0] & 0xFU) << 8U) | msg->data[1], 12);
       int angle_fraction = to_signed((msg->data[4] >> 4U) & 0xFU, 4);
@@ -266,10 +268,10 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
       bool cruise_engaged = GET_BIT(msg, 5U); // PCM_CRUISE.CRUISE_ACTIVE
       pcm_cruise_check(cruise_engaged);
     }
-    if (msg_matches(msg, 0x116U, 0U)) {
+    if (msg_matches(msg, 0x116U, toyota_tss3 ? tss3_rx_bus : 0U)) {
       gas_pressed = msg->data[1] != 0U; // GAS_PEDAL.GAS_PEDAL_USER
     }
-    if (msg_matches(msg, 0x101U, 0U)) {
+    if (msg_matches(msg, 0x101U, toyota_tss3 ? tss3_rx_bus : 0U)) {
       brake_pressed = GET_BIT(
           msg,
           3U); // BRAKE_MODULE.BRAKE_PRESSED (toyota_rav4_prime_generated.dbc)
@@ -293,7 +295,7 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
   }
 
   // sample speed
-  if (msg_matches(msg, 0xaaU, 0U)) {
+  if (msg_matches(msg, 0xaaU, toyota_tss3 ? tss3_rx_bus : 0U)) {
     int speed = 0;
     // sum 4 wheel speeds. conversion: raw * 0.01 - 67.67
     for (uint8_t i = 0U; i < 8U; i += 2U) {
@@ -784,6 +786,8 @@ static safety_config toyota_init(uint16_t param) {
   // now
   const uint32_t TOYOTA_PARAM_TSS3 = 16UL << TOYOTA_PARAM_OFFSET;
   toyota_tss3 = GET_FLAG(param, TOYOTA_PARAM_TSS3);
+  const uint32_t TOYOTA_PARAM_TSS3_RX_BUS_2 = 32UL << TOYOTA_PARAM_OFFSET;
+  toyota_tss3_rx_bus_2 = toyota_tss3 && GET_FLAG(param, TOYOTA_PARAM_TSS3_RX_BUS_2);
 #endif
 
   toyota_alt_brake = GET_FLAG(param, TOYOTA_PARAM_ALT_BRAKE);
@@ -821,9 +825,14 @@ static safety_config toyota_init(uint16_t param) {
   }
 
   if (toyota_tss3) {
-    static const RxCheck toyota_tss3_rx_checks[] = {TOYOTA_TSS3_RX_CHECKS};
+    static const RxCheck toyota_tss3_rx_checks_bus_0[] = {TOYOTA_TSS3_RX_CHECKS(0)};
+    static const RxCheck toyota_tss3_rx_checks_bus_2[] = {TOYOTA_TSS3_RX_CHECKS(2)};
 
-    SET_RX_CHECKS(toyota_tss3_rx_checks, ret);
+    if (toyota_tss3_rx_bus_2) {
+      SET_RX_CHECKS(toyota_tss3_rx_checks_bus_2, ret);
+    } else {
+      SET_RX_CHECKS(toyota_tss3_rx_checks_bus_0, ret);
+    }
   } else if (toyota_secoc) {
     static const RxCheck toyota_secoc_rx_checks[] = {TOYOTA_SECOC_RX_CHECKS};
 
