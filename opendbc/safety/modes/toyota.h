@@ -42,6 +42,7 @@
 #define TOYOTA_TSS3_TX_MSGS                                                    \
   {0x777, 1, 8, .check_relay = false},     /* signer admin */                  \
       {0x777, 0, 8, .check_relay = false}, /* signer requests */               \
+      {0x777, 2, 8, .check_relay = false}, /* Corolla signer requests */       \
       {0x08A, 0, 32, .check_relay = true,                                      \
        .disable_static_blocking = true},   /* CONTROL_REQUEST */               \
       {0x412, 0, 8, .check_relay = true},  /* LKAS_HUD */                      \
@@ -517,9 +518,11 @@ static bool toyota_tss3_tx_hook(const CANPacket_t *msg,
     }
   }
 
-  // signer requests: four fragments of the unsigned CONTROL_REQUEST
-  if (msg_matches(msg, 0x777U, 0U)) {
-    tx = toyota_tss3_request_fragment(msg, long_limits, now);
+  // signer requests: four fragments of the unsigned CONTROL_REQUEST. Corolla's
+  // EPS remains on bus 2 when the relay opens; the other TSS3 harnesses use 0.
+  if ((msg->addr == 0x777U) && ((msg->bus == 0U) || (msg->bus == 2U))) {
+    const uint8_t signer_bus = toyota_tss3_rx_bus_2 ? 2U : 0U;
+    tx = (msg->bus == signer_bus) && toyota_tss3_request_fragment(msg, long_limits, now);
   }
 
   // CONTROL_REQUEST with the SecOC trailer from the signer
