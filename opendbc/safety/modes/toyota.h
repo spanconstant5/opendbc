@@ -42,6 +42,8 @@
       {0x777, 2, 8, .check_relay = false}, /* Corolla signer requests */       \
       {0x08A, 0, 32, .check_relay = true,                                      \
        .disable_static_blocking = true},   /* CONTROL_REQUEST */               \
+      {0x08A, 2, 32, .check_relay = false,                                     \
+       .disable_static_blocking = true},   /* Corolla CONTROL_REQUEST */       \
       {0x412, 0, 8, .check_relay = true},  /* LKAS_HUD */                      \
       {0x101, 2, 8, .check_relay = false}, /* BRAKE_MODULE cancel */
 
@@ -435,9 +437,12 @@ static bool toyota_tss3_tx_hook(const CANPacket_t *msg, const LongitudinalLimits
     tx = (msg->bus == signer_bus) && toyota_tss3_request_fragment(msg, long_limits, now);
   }
 
-  // CONTROL_REQUEST with the SecOC trailer from the signer
-  if (msg_matches(msg, 0x8AU, 0U)) {
-    tx = toyota_tss3_08a_active && msg->fd && toyota_tss3_publish_approved(msg, now);
+  // CONTROL_REQUEST with the SecOC trailer from the signer. Corolla's
+  // repinned control path is bus 2; the other TSS3 harnesses use bus 0.
+  if ((msg->addr == 0x8AU) && ((msg->bus == 0U) || (msg->bus == 2U))) {
+    const uint8_t publication_bus = toyota_tss3_rx_bus_2 ? 2U : 0U;
+    tx = (msg->bus == publication_bus) && toyota_tss3_08a_active && msg->fd &&
+         toyota_tss3_publish_approved(msg, now);
     if (tx) {
       toyota_tss3_08a_last_tx_ts = now;
     } else {
