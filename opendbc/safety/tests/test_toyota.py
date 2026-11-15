@@ -929,6 +929,20 @@ class TestToyotaTss3SafetyBus2Rx(common.SafetyTestBase):
                    for address, dat, frame_bus in build_signer_requests(1, request, bus)]
         self.assertEqual(results, [allowed] * 4)
 
+  def test_control_request_publication_uses_bus_2(self):
+    request = build_host_application(stock=TSS3_FRC_08A)
+    for bus, allowed in ((0, False), (2, True)):
+      with self.subTest(bus=bus):
+        self._reset_safety_hooks()
+        self.safety.init_tests()
+        self.assertTrue(self._rx(libsafety_py.make_CANPacket(0x08A, 2, TSS3_FRC_08A)))
+        self.assertTrue(self._tx(Tss3SafetyHelpers._admin_msg(True)))
+        self.assertTrue(all(self._tx(libsafety_py.make_CANPacket(address, frame_bus, dat))
+                            for address, dat, frame_bus in build_signer_requests(1, request, 2)))
+        msg = libsafety_py.make_CANPacket(0x08A, bus, request + TSS3_TRAILER)
+        msg[0].fd = 1
+        self.assertEqual(self._tx(msg), allowed)
+
 
 if __name__ == "__main__":
   unittest.main()
