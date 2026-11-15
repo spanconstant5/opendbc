@@ -306,7 +306,7 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
     .wheelbase = 2.825F,
   };
 
-  bool valid = toyota_stock_longitudinal ? toyota_tss3_stock_08a_match(request, now) : toyota_tss3_08a_match(request);
+  bool valid = safety_setup.toyota_stock_longitudinal ? toyota_tss3_stock_08a_match(request, now) : toyota_tss3_08a_match(request);
 
   // CONTROL_REQUEST's Toyota checksum covers its first 8 bytes.
   valid = valid && (request[7] == toyota_checksum(request, 8, 0x8AU));
@@ -320,8 +320,8 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
   if (valid) {
     // requests are only sent while openpilot is engaged, start from the measured angle after a gap
     if (safety_get_ts_elapsed(now, toyota_tss3_last_request_ts) > TOYOTA_TSS3_08A_TIMEOUT_US) {
-      desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
-                                        TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
+      safety.desired_angle_last = SAFETY_CLAMP(safety.angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
+                                               TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
     }
     toyota_tss3_last_request_ts = now;
 
@@ -330,11 +330,11 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
     bool violation = steer_angle_cmd_checks_vm(angle, lat_active, TOYOTA_TSS3_ANGLE_STEERING_LIMITS, TOYOTA_TSS3_STEERING_PARAMS);
     if (safety_max_limit_check(angle, TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle, -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle)) {
       violation = true;
-      desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
-                                        TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
+      safety.desired_angle_last = SAFETY_CLAMP(safety.angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
+                                               TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
     }
 
-    if (!toyota_stock_longitudinal) {
+    if (!safety_setup.toyota_stock_longitudinal) {
       // LONGITUDINAL_REQUEST_ID_UPPER/ALLOCATION_METHOD_UPPER and
       // LONGITUDINAL_REQUEST_ACCEL_UPPER/LOWER
       int accel_upper = to_signed((request[8] << 8U) | request[9], 16);
@@ -343,7 +343,7 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
                   (accel_upper != accel_lower);
 
       // No gas pressed check: the motion controller in the brake ECU arbitrates driver gas against this request
-      bool accel_valid = controls_allowed && !safety_max_limit_check(accel_upper, long_limits.max_accel, long_limits.min_accel);
+      bool accel_valid = safety.controls_allowed && !safety_max_limit_check(accel_upper, long_limits.max_accel, long_limits.min_accel);
       violation = violation || !(accel_valid || (accel_upper == long_limits.inactive_accel));
     }
     valid = !violation;
@@ -422,7 +422,7 @@ static bool toyota_tss3_tx_hook(const CANPacket_t *msg, const LongitudinalLimits
       // with stock longitudinal, openpilot needs a recent FRC request to copy
       bool stock_08a_recent = (toyota_tss3_stock_08a_cnt > 0U) &&
                               (safety_get_ts_elapsed(now, toyota_tss3_stock_08a_last_ts) <= TOYOTA_TSS3_08A_TIMEOUT_US);
-      tx = !toyota_tss3_stock_pcs && (!toyota_stock_longitudinal || stock_08a_recent);
+      tx = !toyota_tss3_stock_pcs && (!safety_setup.toyota_stock_longitudinal || stock_08a_recent);
       if (tx) {
         toyota_tss3_08a_active = true;
         toyota_tss3_08a_last_tx_ts = now;
