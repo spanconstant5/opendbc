@@ -89,9 +89,6 @@
   {.msg = {{0x116, 0, 8, 42U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{0x101, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
-static bool toyota_tss3 = false;
-static bool toyota_tss3_rx_bus_2 = false;
-
 // TSS3: openpilot replaces the FRC's CONTROL_REQUEST (0x08A) while the EPS signer is armed.
 // Requests are checked when they are sent to the signer, and only approved requests can be published once signed.
 // The VMC in the brake ECU needs a continuous CONTROL_REQUEST: it sets CONTROL_RESULT.REQUEST_LOSS ~90 ms after the
@@ -105,20 +102,25 @@ static bool toyota_tss3_rx_bus_2 = false;
 #define TOYOTA_TSS3_FRAGMENT_LEN 7U
 #define TOYOTA_TSS3_APPROVED_LEN 8U
 #define TOYOTA_TSS3_STOCK_08A_HISTORY 2U
-static bool toyota_tss3_08a_active = false;
-static bool toyota_tss3_stock_pcs = false;
-static uint32_t toyota_tss3_08a_last_tx_ts = 0U;
-static uint8_t toyota_tss3_request_next_fragment = 0U;
-static uint32_t toyota_tss3_last_request_ts = 0U;
-static uint8_t toyota_tss3_approved[TOYOTA_TSS3_APPROVED_LEN][TOYOTA_TSS3_08A_LEN];
-static uint32_t toyota_tss3_approved_ts[TOYOTA_TSS3_APPROVED_LEN];
-static bool toyota_tss3_approved_valid[TOYOTA_TSS3_APPROVED_LEN];
-static uint8_t toyota_tss3_approved_idx = 0U;
-static uint8_t toyota_tss3_stock_08a[TOYOTA_TSS3_STOCK_08A_HISTORY][TOYOTA_TSS3_08A_LEN];
-static uint32_t toyota_tss3_stock_08a_ts[TOYOTA_TSS3_STOCK_08A_HISTORY];
-static uint32_t toyota_tss3_stock_08a_last_ts = 0U;
-static uint8_t toyota_tss3_stock_08a_idx = 0U;
-static uint8_t toyota_tss3_stock_08a_cnt = 0U;
+
+#define toyota_tss3 safety_setup.toyota_tss3
+#define toyota_tss3_rx_bus_2 safety_setup.toyota_tss3_rx_bus_2
+#define toyota_tss3_08a_active safety.toyota_tss3_08a_active
+#define toyota_tss3_stock_pcs safety.toyota_tss3_stock_pcs
+#define toyota_tss3_08a_last_tx_ts safety.toyota_tss3_08a_last_tx_ts
+#define toyota_tss3_request_next_fragment safety.toyota_tss3_request_next_fragment
+#define toyota_tss3_last_request_ts safety.toyota_tss3_last_request_ts
+#define toyota_tss3_request safety.toyota_tss3_request
+#define toyota_tss3_request_seq safety.toyota_tss3_request_seq
+#define toyota_tss3_approved safety.toyota_tss3_approved
+#define toyota_tss3_approved_ts safety.toyota_tss3_approved_ts
+#define toyota_tss3_approved_valid safety.toyota_tss3_approved_valid
+#define toyota_tss3_approved_idx safety.toyota_tss3_approved_idx
+#define toyota_tss3_stock_08a safety.toyota_tss3_stock_08a
+#define toyota_tss3_stock_08a_ts safety.toyota_tss3_stock_08a_ts
+#define toyota_tss3_stock_08a_last_ts safety.toyota_tss3_stock_08a_last_ts
+#define toyota_tss3_stock_08a_idx safety.toyota_tss3_stock_08a_idx
+#define toyota_tss3_stock_08a_cnt safety.toyota_tss3_stock_08a_cnt
 
 static uint8_t toyota_checksum(const uint8_t data[], int len, uint32_t addr) {
   uint8_t checksum = (uint8_t)addr + (uint8_t)(addr >> 8U) + (uint8_t)len;
@@ -301,9 +303,9 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
   };
 
   static const AngleSteeringParams TOYOTA_TSS3_STEERING_PARAMS = {
-    .slip_factor = -0.0007484283457339188F,  // calc_slip_factor(VM)
+    .slip_factor = -0.0007485660712873701F,  // calc_slip_factor(VM)
     .steer_ratio = 15.3F,
-    .wheelbase = 2.825F,
+    .wheelbase = 2.82448F,
   };
 
   bool valid = safety_setup.toyota_stock_longitudinal ? toyota_tss3_stock_08a_match(request, now) : toyota_tss3_08a_match(request);
@@ -352,9 +354,6 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
 }
 
 static bool toyota_tss3_request_fragment(const CANPacket_t *msg, const LongitudinalLimits long_limits, uint32_t now) {
-  static uint8_t toyota_tss3_request[TOYOTA_TSS3_08A_LEN];
-  static uint8_t toyota_tss3_request_seq[2];  // low and high sequence nibbles, repeated in fragments 2 and 3
-
   // the header's high nibble is the fragment index (8-B), the low nibble alternates the low and high sequence nibbles
   const uint8_t fragment = (msg->data[0] >> 4U) & 0x3U;
   const uint8_t seq_nibble = msg->data[0] & 0xFU;
