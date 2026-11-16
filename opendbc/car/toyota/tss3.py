@@ -85,9 +85,11 @@ class SignerTransport:
     if enabled:
       self.probe_sequence = None
     if CS.tss3_control_request_rejected and self.active:
-      # panda forwards the FRC's CONTROL_REQUEST again, re-arm with the next signed request
+      # Panda forwards the FRC's CONTROL_REQUEST again, re-arm with the next
+      # signed request. A queued publication is normally rejected when the
+      # driver disengages with brake/gas/cancel; that is a safety transition,
+      # not evidence that the EPS signer stopped answering.
       self._release(sends, "control_request_rejected")
-      self.available = False
 
     for response in CS.tss3_signer_responses:
       seq = int(response["SIGNER_SEQUENCE"])
