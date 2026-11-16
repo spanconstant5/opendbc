@@ -15,6 +15,7 @@ from opendbc.car.vehicle_model import VehicleModel
 from opendbc.can import CANPacker
 
 from opendbc.sunnypilot.car.toyota.gas_interceptor import GasInterceptorCarController
+from opendbc.sunnypilot.car.toyota.icbm import IntelligentCruiseButtonManagementInterface
 from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP, TSS2_SMOOTH_KI
 
 Ecu = structs.CarParams.Ecu
@@ -61,10 +62,11 @@ def get_long_tune(CP, params, CP_SP):
                        rate=1 / (DT_CTRL * 3))
 
 
-class CarController(CarControllerBase, GasInterceptorCarController):
+class CarController(CarControllerBase, GasInterceptorCarController, IntelligentCruiseButtonManagementInterface):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
     GasInterceptorCarController.__init__(self, CP, CP_SP)
+    IntelligentCruiseButtonManagementInterface.__init__(self, CP, CP_SP)
     self.params = CarControllerParams(self.CP)
     self.last_torque = 0
     self.last_angle = 0
@@ -99,7 +101,7 @@ class CarController(CarControllerBase, GasInterceptorCarController):
       # Vehicle model used for lateral limiting
       self.VM = VehicleModel(get_safety_CP())
 
-  def update_tss3(self, CC, CS, now_nanos):
+  def update_tss3(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
     hud_control = CC.hudControl
     # panda forwards the FRC's CONTROL_REQUEST while it requests PCS braking
@@ -129,6 +131,8 @@ class CarController(CarControllerBase, GasInterceptorCarController):
     if CC.cruiseControl.cancel:
       can_sends.append(toyotacan.create_tss3_brake_cancel_command(self.packer, CS.tss3_brake_module, TSS3_SOURCE_BUS))
 
+    can_sends.extend(IntelligentCruiseButtonManagementInterface.update(self, CS, CC_SP, self.frame))
+
     # *** hud ui ***
     # at 5Hz, or immediately on alert change
     steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
@@ -146,7 +150,7 @@ class CarController(CarControllerBase, GasInterceptorCarController):
 
   def update(self, CC, CC_SP, CS, now_nanos):
     if self.CP.flags & ToyotaFlags.TSS3:
-      return self.update_tss3(CC, CS, now_nanos)
+      return self.update_tss3(CC, CC_SP, CS, now_nanos)
 
     actuators = CC.actuators
     stopping = actuators.longControlState == LongCtrlState.stopping

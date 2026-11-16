@@ -35,6 +35,13 @@ UNSUPPORTED_DSU = [
 TSS3_DBC = "toyota_tss3_pt_generated"
 TSS3_PACKER = CANPacker(TSS3_DBC)
 TSS3_TRAILER = bytes.fromhex("5db7797f")  # from a recorded CONTROL_REQUEST
+TSS3_CRUISE_BUTTONS = bytes.fromhex("567d393f0000c36200000000000000002640000000ff000000000000d54aaf10")
+
+
+def tss3_cruise_buttons_msg(dat: bytes, bus: int = 2):
+  msg = libsafety_py.make_CANPacket(0x0FE, bus, dat)
+  msg[0].fd = 1
+  return msg
 
 
 class TestToyotaSafetyBase(common.CarSafetyTest, common.LongitudinalAccelSafetyTest):
@@ -993,6 +1000,7 @@ class TestToyotaTss3SafetyBus2Rx(common.SafetyTestBase):
       self.packer.make_can_msg_safety("GAS_PEDAL", bus, {}),
       self.packer.make_can_msg_safety("BRAKE_MODULE", bus, {}, fix_toyota_checksum),
       libsafety_py.make_CANPacket(0x08A, 2, TSS3_FRC_08A),
+      tss3_cruise_buttons_msg(TSS3_CRUISE_BUTTONS, bus),
     ]
 
   def test_required_rx_checks_use_bus_2(self):
@@ -1030,6 +1038,81 @@ class TestToyotaTss3SafetyBus2Rx(common.SafetyTestBase):
         msg = libsafety_py.make_CANPacket(0x08A, bus, request + TSS3_TRAILER)
         msg[0].fd = 1
         self.assertEqual(self._tx(msg), allowed)
+
+  def test_icbm_res_and_set_clone_recent_neutral_stock(self):
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._rx(tss3_cruise_buttons_msg(TSS3_CRUISE_BUTTONS)))
+
+    res = bytearray(TSS3_CRUISE_BUTTONS)
+    res[3] |= 0x80
+    res[6] &= 0x7F
+    self.assertTrue(self._tx(tss3_cruise_buttons_msg(bytes(res))))
+
+    set_button = bytearray(TSS3_CRUISE_BUTTONS)
+    set_button[4] |= 0x80
+    set_button[7] &= 0xBF
+    self.assertTrue(self._tx(tss3_cruise_buttons_msg(bytes(set_button))))
+
+  def test_icbm_rejects_without_controls_or_recent_stock(self):
+    res = bytearray(TSS3_CRUISE_BUTTONS)
+    res[3] |= 0x80
+    res[6] &= 0x7F
+    msg = tss3_cruise_buttons_msg(bytes(res))
+
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(msg))
+    self.assertTrue(self._rx(tss3_cruise_buttons_msg(TSS3_CRUISE_BUTTONS)))
+    self.safety.set_controls_allowed(False)
+    self.assertFalse(self._tx(msg))
+    self.safety.set_controls_allowed(True)
+    self.safety.set_timer(100_001)
+    self.assertFalse(self._tx(msg))
+
+  def test_icbm_rejects_with_openpilot_longitudinal(self):
+    safety_param = self.SAFETY_PARAM & ~ToyotaSafetyFlags.STOCK_LONGITUDINAL
+    self.safety.set_safety_hooks(CarParams.SafetyModel.toyota, safety_param)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._rx(tss3_cruise_buttons_msg(TSS3_CRUISE_BUTTONS)))
+
+    res = bytearray(TSS3_CRUISE_BUTTONS)
+    res[3] |= 0x80
+    res[6] &= 0x7F
+    self.assertFalse(self._tx(tss3_cruise_buttons_msg(bytes(res))))
+
+  def test_icbm_rejects_non_button_mutations_and_invalid_pairs(self):
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._rx(tss3_cruise_buttons_msg(TSS3_CRUISE_BUTTONS)))
+
+    invalid = []
+    unknown = bytearray(TSS3_CRUISE_BUTTONS)
+    unknown[10] ^= 1
+    invalid.append(unknown)
+    res_without_mirror = bytearray(TSS3_CRUISE_BUTTONS)
+    res_without_mirror[3] |= 0x80
+    invalid.append(res_without_mirror)
+    both = bytearray(TSS3_CRUISE_BUTTONS)
+    both[3] |= 0x80
+    both[6] &= 0x7F
+    both[4] |= 0x80
+    both[7] &= 0xBF
+    invalid.append(both)
+    cancel = bytearray(TSS3_CRUISE_BUTTONS)
+    cancel[4] |= 0x40
+    cancel[7] &= 0xDF
+    invalid.append(cancel)
+
+    for dat in invalid:
+      with self.subTest(dat=bytes(dat).hex()):
+        self.assertFalse(self._tx(tss3_cruise_buttons_msg(bytes(dat))))
+
+  def test_icbm_yields_to_physical_button(self):
+    self.safety.set_controls_allowed(True)
+    physical_res = bytearray(TSS3_CRUISE_BUTTONS)
+    physical_res[3] |= 0x80
+    physical_res[6] &= 0x7F
+    self.assertTrue(self._rx(tss3_cruise_buttons_msg(bytes(physical_res))))
+    self.assertFalse(self._tx(tss3_cruise_buttons_msg(bytes(physical_res))))
 
 if __name__ == "__main__":
   unittest.main()

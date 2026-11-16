@@ -226,6 +226,8 @@ class CarInterface(CarInterfaceBase):
     else:
       stock_cp.safetyConfigs[0].safetyParam &= ~ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
 
+    ret.intelligentCruiseButtonManagementAvailable = candidate == CAR.TOYOTA_COROLLA_TSS3 and bool(stock_cp.flags & ToyotaFlags.HYBRID)
+
     return ret
 
   @staticmethod

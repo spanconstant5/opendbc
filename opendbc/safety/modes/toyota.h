@@ -47,6 +47,8 @@
        .disable_static_blocking = true},   /* CONTROL_REQUEST */               \
       {0x08A, 2, 32, .check_relay = false,                                     \
        .disable_static_blocking = true},   /* Corolla CONTROL_REQUEST */       \
+      {0x0FE, 2, 32, .check_relay = false,                                     \
+       .disable_static_blocking = true},   /* Corolla cruise buttons */        \
       {0x412, 0, 8, .check_relay = true},  /* LKAS_HUD */                      \
       {0x101, 2, 8, .check_relay = false}, /* BRAKE_MODULE cancel */
 
@@ -103,6 +105,13 @@
                {0},                                                            \
                {0}}},
 
+#define TOYOTA_TSS3_COROLLA_RX_CHECKS                                          \
+  TOYOTA_TSS3_RX_CHECKS(2)                                                     \
+  {.msg = {{0x0FE, 2, 32, 30U, .ignore_checksum = true,                        \
+            .ignore_counter = true, .ignore_quality_flag = true},              \
+           {0},                                                                \
+           {0}}},
+
 #define TOYOTA_SECOC_RX_CHECKS                                                 \
   TOYOTA_COMMON_RX_CHECKS(false){                                              \
       .msg = {{0x176, 0, 8, 32U, .ignore_counter = true,                       \
@@ -150,6 +159,7 @@ static bool toyota_tss3_rx_bus_2 = false;
 #define TOYOTA_TSS3_FRAGMENT_LEN 7U
 #define TOYOTA_TSS3_APPROVED_LEN 8U
 #define TOYOTA_TSS3_STOCK_08A_HISTORY 2U
+#define TOYOTA_TSS3_0FE_TIMEOUT_US 100000U
 static bool toyota_tss3_08a_active = false;
 static bool toyota_tss3_stock_pcs = false;
 static uint32_t toyota_tss3_08a_last_tx_ts = 0U;
@@ -166,6 +176,9 @@ static uint32_t toyota_tss3_stock_08a_ts[TOYOTA_TSS3_STOCK_08A_HISTORY];
 static uint32_t toyota_tss3_stock_08a_last_ts = 0U;
 static uint8_t toyota_tss3_stock_08a_idx = 0U;
 static uint8_t toyota_tss3_stock_08a_cnt = 0U;
+static uint8_t toyota_tss3_stock_0fe[32];
+static uint32_t toyota_tss3_stock_0fe_ts = 0U;
+static bool toyota_tss3_stock_0fe_valid = false;
 static int toyota_dbc_eps_torque_factor =
     100; // conversion factor for STEER_TORQUE_EPS in %: see dbc file
 
@@ -236,6 +249,16 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
       if (toyota_tss3_stock_pcs) {
         toyota_tss3_08a_active = false;
       }
+    }
+
+    // Corolla's steering-wheel cruise switches. Retain the latest complete
+    // OEM frame so TX can change only a RES/SET complementary bit pair.
+    if (toyota_tss3_rx_bus_2 && msg_matches(msg, 0xFEU, 2U, 32U)) {
+      for (uint8_t i = 0U; i < 32U; i++) {
+        toyota_tss3_stock_0fe[i] = msg->data[i];
+      }
+      toyota_tss3_stock_0fe_ts = microsecond_timer_get();
+      toyota_tss3_stock_0fe_valid = true;
     }
 
     // STEER_ANGLE_SENSOR, in LATERAL_REQUEST_PINION_ANGLE units
@@ -531,6 +554,50 @@ static bool toyota_tss3_publish_approved(const CANPacket_t *msg, uint32_t now) {
   return approved;
 }
 
+static bool toyota_tss3_cruise_buttons_valid(const CANPacket_t *msg,
+                                             uint32_t now) {
+  bool valid = toyota_tss3_rx_bus_2 && toyota_stock_longitudinal &&
+               controls_allowed && msg->fd && toyota_tss3_stock_0fe_valid &&
+               (safety_get_ts_elapsed(now, toyota_tss3_stock_0fe_ts) <=
+                TOYOTA_TSS3_0FE_TIMEOUT_US);
+
+  // The source frame must be neutral with valid inverted mirrors. Do not
+  // overwrite a physical RES, SET, CANCEL, or MAIN press.
+  const bool stock_neutral =
+      ((toyota_tss3_stock_0fe[3] & 0x80U) == 0U) &&
+      ((toyota_tss3_stock_0fe[6] & 0x80U) != 0U) &&
+      ((toyota_tss3_stock_0fe[4] & 0x80U) == 0U) &&
+      ((toyota_tss3_stock_0fe[7] & 0x40U) != 0U) &&
+      ((toyota_tss3_stock_0fe[4] & 0x40U) == 0U) &&
+      ((toyota_tss3_stock_0fe[7] & 0x20U) != 0U) &&
+      ((toyota_tss3_stock_0fe[7] & 0x04U) == 0U);
+  valid = valid && stock_neutral;
+
+  // Compare every bit except the two allowed button/complement pairs.
+  for (uint8_t i = 0U; i < 32U; i++) {
+    uint8_t mask = 0xFFU;
+    if ((i == 3U) || (i == 4U) || (i == 6U)) {
+      mask = 0x7FU;
+    } else if (i == 7U) {
+      mask = 0xBFU;
+    } else {
+      // compare the whole byte
+    }
+    valid = valid &&
+            (((msg->data[i] ^ toyota_tss3_stock_0fe[i]) & mask) == 0U);
+  }
+
+  const bool res = ((msg->data[3] & 0x80U) != 0U) &&
+                   ((msg->data[6] & 0x80U) == 0U) &&
+                   ((msg->data[4] & 0x80U) == 0U) &&
+                   ((msg->data[7] & 0x40U) != 0U);
+  const bool set = ((msg->data[4] & 0x80U) != 0U) &&
+                   ((msg->data[7] & 0x40U) == 0U) &&
+                   ((msg->data[3] & 0x80U) == 0U) &&
+                   ((msg->data[6] & 0x80U) != 0U);
+  return valid && (res || set);
+}
+
 static bool toyota_tss3_tx_hook(const CANPacket_t *msg,
                                 const LongitudinalLimits long_limits) {
   bool tx = true;
@@ -580,6 +647,10 @@ static bool toyota_tss3_tx_hook(const CANPacket_t *msg,
       // the car always needs a CONTROL_REQUEST, forward the FRC's again
       toyota_tss3_08a_active = false;
     }
+  }
+
+  if (msg_matches(msg, 0xFEU, 2U, 32U)) {
+    tx = toyota_tss3_cruise_buttons_valid(msg, now);
   }
 
   // BRAKE_MODULE with only BRAKE_PRESSED set cancels stock cruise
@@ -868,6 +939,8 @@ static safety_config toyota_init(uint16_t param) {
   toyota_tss3_stock_08a_last_ts = 0U;
   toyota_tss3_stock_08a_idx = 0U;
   toyota_tss3_stock_08a_cnt = 0U;
+  toyota_tss3_stock_0fe_ts = 0U;
+  toyota_tss3_stock_0fe_valid = false;
   toyota_dbc_eps_torque_factor = param & TOYOTA_EPS_FACTOR;
 
   const bool toyota_unsupported_dsu = GET_FLAG(current_safety_param_sp, TOYOTA_PARAM_SP_UNSUPPORTED_DSU);
@@ -897,7 +970,7 @@ static safety_config toyota_init(uint16_t param) {
 
   if (toyota_tss3) {
     static RxCheck toyota_tss3_rx_checks_bus_0[] = {TOYOTA_TSS3_RX_CHECKS(0)};
-    static RxCheck toyota_tss3_rx_checks_bus_2[] = {TOYOTA_TSS3_RX_CHECKS(2)};
+    static RxCheck toyota_tss3_rx_checks_bus_2[] = {TOYOTA_TSS3_COROLLA_RX_CHECKS};
 
     if (toyota_tss3_rx_bus_2) {
       SET_RX_CHECKS(toyota_tss3_rx_checks_bus_2, ret);
