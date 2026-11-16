@@ -577,6 +577,27 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
                     (structs.CarState.ButtonEvent.Type.gapAdjustCruise, False)] if pressed else []
         self.assertEqual([(e.type, e.pressed) for e in state.buttonEvents], expected)
 
+  def test_corolla_cruise_button_events(self):
+    if self.car_model != CAR.TOYOTA_COROLLA_TSS3:
+      self.skipTest("Corolla-specific 0x0FE cruise switch")
+
+    self.assertTrue(self.ci.CP.flags & ToyotaFlags.HYBRID)
+    packer = CANPacker(DBC[self.car_model][Bus.pt])
+    self.update()  # initialize the stock, button-neutral switch state
+    buttons = (
+      ("CANCEL_BUTTON", structs.CarState.ButtonEvent.Type.cancel),
+      ("SET_BUTTON", structs.CarState.ButtonEvent.Type.decelCruise),
+      ("RES_BUTTON", structs.CarState.ButtonEvent.Type.accelCruise),
+      ("MAIN_BUTTON", structs.CarState.ButtonEvent.Type.mainCruise),
+    )
+    for signal, button_type in buttons:
+      with self.subTest(signal=signal):
+        _, pressed, _ = packer.make_can_msg("CRUISE_BUTTONS", TSS3_SOURCE_BUS, {signal: 1})
+        state = self.update(iterations=1, x0FE=pressed)
+        self.assertEqual([(e.type, e.pressed) for e in state.buttonEvents], [(button_type, True)])
+        state = self.update(iterations=1, x0FE=TSS3_MSGS[0x0FE])
+        self.assertEqual([(e.type, e.pressed) for e in state.buttonEvents], [(button_type, False)])
+
 
 class TestToyotaTSS3SignerTransport(unittest.TestCase):
   def setUp(self):
@@ -725,6 +746,17 @@ class TestToyotaTSS3SignerTransport(unittest.TestCase):
     self.assertEqual([dat for addr, dat, _ in sends if addr == 0x777 and dat[0] == 0x07], [SIGNER_RELEASE])
     self.step()
     assert (0x777, SIGNER_ARM, TSS3_AUX_BUS) in self.step(signer_state([signer_response(4)]))
+
+  def test_rejected_publication_during_driver_disengagement_keeps_signer_available(self):
+    self.step()
+    self.step(signer_state([signer_response(1)]))
+    self.assertTrue(self.signer.active and self.signer.available)
+
+    sends = self.step(signer_state(control_request_rejected=True), enabled=False)
+
+    self.assertIn((0x777, SIGNER_RELEASE, TSS3_AUX_BUS), sends)
+    self.assertFalse(self.signer.active)
+    self.assertTrue(self.signer.available)
 
   def test_angle_reference_reset(self):
     self.assertTrue(self.signer.angle_reference_reset(self.t))
