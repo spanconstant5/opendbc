@@ -51,6 +51,7 @@ class CarState(CarStateBase, CarStateExt):
     self.lkas_button = 0
     self.distance_button = 0
     self.tss3_cruise_button = 0
+    self.tss3_cruise_buttons = b""
     self.tss3_lta_switch_state = None
 
     self.pcm_follow_distance = 0
@@ -136,6 +137,7 @@ class CarState(CarStateBase, CarStateExt):
     button_events = []
     if self.CP.flags & ToyotaFlags.HYBRID:
       switch = cp.vl["CRUISE_BUTTONS"]
+      self.tss3_cruise_buttons = bytes(int(switch[f"BYTE_{i:02d}"]) for i in range(32))
       previous_button = self.tss3_cruise_button
       if switch["CANCEL_BUTTON"] and not switch["CANCEL_BUTTON_MIRROR_N"]:
         self.tss3_cruise_button = 1

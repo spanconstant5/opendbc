@@ -9,6 +9,7 @@ from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.toyota.fingerprints import FW_VERSIONS
 from opendbc.car.toyota.interface import CarInterface
 from opendbc.car.toyota.radar_interface import TSS3_DIST_INVALID, TSS3_GEOMETRY_MSGS, TSS3_SLOTS, RadarInterface
+from opendbc.sunnypilot.car.toyota.icbm import create_tss3_cruise_button_command
 from opendbc.car.toyota.toyotacan import toyota_checksum
 from opendbc.car.toyota.tss3 import SIGNER_MAX_PENDING, SIGNER_TIMEOUT_NS, TSS3_AUX_BUS, TSS3_CHASSIS_BUS, TSS3_SOURCE_BUS, \
                                     SignerTransport
@@ -327,9 +328,9 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
       self.can_t += 10 * MS
     return state
 
-  def apply(self, cc):
+  def apply(self, cc, cc_sp=None):
     self.t += 10 * MS
-    return self.ci.apply(cc, structs.CarControlSP(), self.t)
+    return self.ci.apply(cc, cc_sp or structs.CarControlSP(), self.t)
 
   def last_request(self):
     return next(reversed(self.ci.CC.signer.pending.values())).values
@@ -346,6 +347,9 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
       self.assertEqual((self.ci.CC.signer.signer_bus, self.ci.CC.signer.publication_bus),
                        (expected_control_bus, expected_control_bus))
       self.assertEqual(bool(CP.flags & ToyotaFlags.HAS_BSM), self.car_model != CAR.TOYOTA_COROLLA_TSS3)
+      CP_SP = CarInterface.get_params_sp(CP, self.car_model, tss3_fingerprint(), [], alpha_long, False, False)
+      self.assertEqual(CP_SP.intelligentCruiseButtonManagementAvailable,
+                       self.car_model == CAR.TOYOTA_COROLLA_TSS3)
     self.assertTrue(self.params(alpha_long=False, is_release=True).dashcamOnly)
 
   def test_carstate(self):
@@ -546,7 +550,7 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
 
     stock_long = self.interface(alpha_long=False)
     self.update(stock_long, speed_ms=5.0)
-    self.assertEqual(stock_long.apply(tss3_control(active=False, accel=1.0, long_active=True), self.t)[0].accel, 0.0)
+    self.assertEqual(stock_long.apply(tss3_control(active=False, accel=1.0, long_active=True), structs.CarControlSP(), self.t)[0].accel, 0.0)
 
   def test_cancel_and_hud(self):
     self.update(x412=bytes.fromhex("1000002200ee9307"))
@@ -597,6 +601,54 @@ class TestToyotaTSS3CarInterface(unittest.TestCase):
         self.assertEqual([(e.type, e.pressed) for e in state.buttonEvents], [(button_type, True)])
         state = self.update(iterations=1, x0FE=TSS3_MSGS[0x0FE])
         self.assertEqual([(e.type, e.pressed) for e in state.buttonEvents], [(button_type, False)])
+
+  def test_corolla_icbm_clones_stock_cruise_buttons(self):
+    if self.car_model != CAR.TOYOTA_COROLLA_TSS3:
+      self.skipTest("Corolla-specific 0x0FE cruise switch")
+
+    self.ci = self.interface(alpha_long=False)
+    self.update()
+    self.assertEqual(self.ci.CS.tss3_cruise_buttons, TSS3_MSGS[0x0FE])
+
+    for button, set_byte, set_mask, clear_byte, clear_mask in (
+      (structs.IntelligentCruiseButtonManagement.SendButtonState.increase, 3, 0x80, 6, 0x80),
+      (structs.IntelligentCruiseButtonManagement.SendButtonState.decrease, 4, 0x80, 7, 0x40),
+    ):
+      with self.subTest(button=button):
+        expected = bytearray(TSS3_MSGS[0x0FE])
+        expected[set_byte] |= set_mask
+        expected[clear_byte] &= ~clear_mask
+        self.assertEqual(create_tss3_cruise_button_command(TSS3_MSGS[0x0FE], button),
+                         CanData(0x0FE, bytes(expected), TSS3_SOURCE_BUS))
+
+        cc_sp = structs.CarControlSP()
+        cc_sp.intelligentCruiseButtonManagement.sendButton = button
+        sent = []
+        for _ in range(6):
+          actuators, sends = self.apply(tss3_control(), cc_sp)
+          sent.extend(msg for msg in sends if msg[0] == 0x0FE)
+        self.assertIn(CanData(0x0FE, bytes(expected), TSS3_SOURCE_BUS), sent)
+        self.assertEqual(actuators.accel, 0.0)
+
+  def test_corolla_icbm_yields_to_physical_button(self):
+    if self.car_model != CAR.TOYOTA_COROLLA_TSS3:
+      self.skipTest("Corolla-specific 0x0FE cruise switch")
+
+    self.ci = self.interface(alpha_long=False)
+    packer = CANPacker(DBC[self.car_model][Bus.pt])
+    _, physical_res, _ = packer.make_can_msg("CRUISE_BUTTONS", TSS3_SOURCE_BUS,
+                                             {"RES_BUTTON": 1, "RES_BUTTON_MIRROR_N": 0})
+    physical_res = bytes(a | b for a, b in zip(TSS3_MSGS[0x0FE], physical_res, strict=True))
+    physical_res = bytearray(physical_res)
+    physical_res[6] &= 0x7F
+    self.update(x0FE=bytes(physical_res))
+
+    cc_sp = structs.CarControlSP()
+    cc_sp.intelligentCruiseButtonManagement.sendButton = structs.IntelligentCruiseButtonManagement.SendButtonState.increase
+    sends = []
+    for _ in range(6):
+      sends.extend(self.apply(tss3_control(), cc_sp)[1])
+    self.assertFalse(any(msg[0] == 0x0FE for msg in sends))
 
 
 class TestToyotaTSS3SignerTransport(unittest.TestCase):
